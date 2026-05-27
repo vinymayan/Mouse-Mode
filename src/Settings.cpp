@@ -17,9 +17,56 @@ namespace Settings {
     int ButtonScrollClick = RE::BSWin32GamepadDevice::Keys::kRightThumb + GAMEPAD_OFFSET;
     int ButtonConfirm = RE::BSWin32GamepadDevice::Keys::kA + GAMEPAD_OFFSET;
     int ButtonCancel = RE::BSWin32GamepadDevice::Keys::kB + GAMEPAD_OFFSET;
+    int ButtonExitMouseMode = RE::BSWin32GamepadDevice::Keys::kBack + GAMEPAD_OFFSET;
 
     const char* SETTINGS_PATH = "Data/SKSE/Plugins/MouseMode_Settings.json";
+    const char* LANG_PATH = "Data/SKSE/Plugins/MouseMode_Language.json";
+    static std::unordered_map<std::string, std::string> LangMap;
 
+    void LoadLanguage() {
+        LangMap.clear();
+        std::ifstream file(LANG_PATH, std::ios::binary);
+        if (!file.is_open()) {
+            SKSE::log::warn("Não foi possível carregar DodgeMod_Language.json. Usando textos padrões.");
+            return;
+        }
+
+        std::stringstream buffer;
+        buffer << file.rdbuf();
+        std::string jsonStr = buffer.str();
+        file.close();
+
+        if (jsonStr.size() >= 3 && (unsigned char)jsonStr[0] == 0xEF && (unsigned char)jsonStr[1] == 0xBB && (unsigned char)jsonStr[2] == 0xBF) {
+            jsonStr.erase(0, 3);
+        }
+
+        rapidjson::Document doc;
+        doc.Parse(jsonStr.c_str());
+
+        if (doc.HasParseError()) return;
+
+        if (doc.IsObject()) {
+            for (auto itr = doc.MemberBegin(); itr != doc.MemberEnd(); ++itr) {
+                if (itr->value.IsObject()) {
+                    std::string category = itr->name.GetString();
+                    for (auto jtr = itr->value.MemberBegin(); jtr != itr->value.MemberEnd(); ++jtr) {
+                        if (jtr->value.IsString()) {
+                            LangMap[category + "." + jtr->name.GetString()] = jtr->value.GetString();
+                        }
+                    }
+                }
+                else if (itr->value.IsString()) {
+                    LangMap[itr->name.GetString()] = itr->value.GetString();
+                }
+            }
+        }
+    }
+
+    const char* GetLoc(const std::string& key, const char* defaultVal) {
+        auto it = LangMap.find(key);
+        if (it != LangMap.end()) return it->second.c_str();
+        return defaultVal;
+    }
     inline std::string ToLower(std::string s) {
         std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::tolower(c); });
         return s;
@@ -81,6 +128,7 @@ namespace Settings {
         doc.AddMember("ButtonScrollClick", ButtonScrollClick, allocator);
         doc.AddMember("ButtonConfirm", ButtonConfirm, allocator);
         doc.AddMember("ButtonCancel", ButtonCancel, allocator);
+        doc.AddMember("ButtonExitMouseMode", ButtonExitMouseMode, allocator);
 
         FILE* fp = nullptr;
         fopen_s(&fp, SETTINGS_PATH, "wb");
@@ -115,6 +163,7 @@ namespace Settings {
                 if (doc.HasMember("ButtonScrollClick")) ButtonScrollClick = doc["ButtonScrollClick"].GetInt();
                 if (doc.HasMember("ButtonConfirm")) ButtonConfirm = doc["ButtonConfirm"].GetInt();
                 if (doc.HasMember("ButtonCancel")) ButtonCancel = doc["ButtonCancel"].GetInt();
+                if (doc.HasMember("ButtonExitMouseMode")) ButtonExitMouseMode = doc["ButtonExitMouseMode"].GetInt();
             }
         }
     }
@@ -122,27 +171,29 @@ namespace Settings {
     void __stdcall Render() {
         bool changed = false;
 
-        ImGui::Text("Mouse Mode Settings");
+        ImGui::Text(GetLoc("Menu.Title", "Mouse Mode Settings"));
         ImGui::Separator();
         ImGui::Spacing();
 
-        ImGui::TextColored({ 0.4f, 0.8f, 1.0f, 1.0f }, "Input Manager Integration");
+        ImGui::TextColored({ 0.4f, 0.8f, 1.0f, 1.0f }, GetLoc("Section.InputManager", "Input Manager Integration"));
 
         if (!InputManagerAPI::_API) {
-            ImGui::TextDisabled("[Input Manager not detected]");
+            ImGui::TextDisabled(GetLoc("InputManager.NotFound", "[Input Manager not detected]"));
         }
         else {
             size_t actionCount = InputManagerAPI::_API->GetInputCount(0);
-            std::string previewValue = "[No Action Selected]";
+            std::string previewValue = GetLoc("InputManager.NoAction", "[No Action Selected]");
             if (MouseModeActionID >= 0 && MouseModeActionID < actionCount) {
                 auto info = InputManagerAPI::_API->GetActionInfo(MouseModeActionID);
-                previewValue = "[" + std::to_string(MouseModeActionID) + "] " + (info.name ? std::string(info.name) : "Unnamed");
+                previewValue = "[" + std::to_string(MouseModeActionID) + "] " + (info.name ? std::string(info.name) : GetLoc("InputManager.Unnamed", "Unnamed"));
             }
 
             ImGui::SetNextItemWidth(300);
-            if (ImGui::BeginCombo("Toggle Mouse Mode Action##ActionSelector", previewValue.c_str())) {
+            // Concatenamos a tradução com a ID interna do ImGui (##ActionSelector) para evitar bugs de foco do combo
+            std::string comboLabel = std::string(GetLoc("InputManager.ToggleAction", "Toggle Mouse Mode Action")) + "##ActionSelector";
+            if (ImGui::BeginCombo(comboLabel.c_str(), previewValue.c_str())) {
 
-                if (ImGui::Selectable("[Disabled]", MouseModeActionID == -1)) {
+                if (ImGui::Selectable(GetLoc("InputManager.Disabled", "[Disabled]"), MouseModeActionID == -1)) {
                     if (MouseModeActionID != -1) {
                         InputManagerAPI::_API->UpdateListener(0, MouseModeActionID, "Mouse Mode", "Toggle Mouse Mode", false, nullptr, 0, nullptr, 0);
                         MouseModeActionID = -1;
@@ -152,7 +203,7 @@ namespace Settings {
 
                 for (int i = 0; i < actionCount; ++i) {
                     auto info = InputManagerAPI::_API->GetActionInfo(i);
-                    std::string itemLabel = "[" + std::to_string(i) + "] " + (info.name ? std::string(info.name) : "Unnamed");
+                    std::string itemLabel = "[" + std::to_string(i) + "] " + (info.name ? std::string(info.name) : GetLoc("InputManager.Unnamed", "Unnamed"));
 
                     if (ImGui::Selectable(itemLabel.c_str(), MouseModeActionID == i)) {
                         if (MouseModeActionID != -1 && MouseModeActionID != i) {
@@ -175,31 +226,41 @@ namespace Settings {
         ImGui::Separator();
         ImGui::Spacing();
 
-        ImGui::TextColored({ 0.4f, 1.0f, 0.4f, 1.0f }, "Stick Configuration");
-        const char* joysticks[] = { "Left Stick", "Right Stick" };
-        if (ImGui::Combo("Mouse Movement Stick", &MouseJoystick, joysticks, 2)) changed = true;
-        if (ImGui::Combo("Directional (Menu) Stick", &DirectionJoystick, joysticks, 2)) changed = true;
+        ImGui::TextColored({ 0.4f, 1.0f, 0.4f, 1.0f }, GetLoc("Section.StickConfig", "Stick Configuration"));
+        const char* joysticks[] = {
+            GetLoc("Stick.Left", "Left Stick"),
+            GetLoc("Stick.Right", "Right Stick")
+        };
+        if (ImGui::Combo(GetLoc("Stick.MouseMovement", "Mouse Movement Stick"), &MouseJoystick, joysticks, 2)) changed = true;
+        if (ImGui::Combo(GetLoc("Stick.Directional", "Directional (Menu) Stick"), &DirectionJoystick, joysticks, 2)) changed = true;
 
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Spacing();
 
-        ImGui::TextColored({ 0.4f, 1.0f, 0.4f, 1.0f }, "Buttons Mapping");
-        auto RenderKeyBind = [&](const char* label, int& keyID) {
+        ImGui::TextColored({ 0.4f, 1.0f, 0.4f, 1.0f }, GetLoc("Section.ButtonsMapping", "Buttons Mapping"));
+        ImGui::PushStyleColor(ImGui::ImGuiCol_Text, { 0.9f, 0.6f, 0.2f, 1.0f });
+        ImGui::TextWrapped(GetLoc("Buttons.Warning", "Buttons not configured below will continue to operate normally as default game controls during Mouse Mode."));
+        ImGui::PopStyleColor();
+        ImGui::Spacing();
+
+        // Lambda atualizada para buscar dinamicamente com base na chave e no fallback literal
+        auto RenderKeyBind = [&](const char* labelKey, const char* defaultLabel, int& keyID) {
             int index = GetIndexFromID(keyID, gamepadKeyIDs, std::size(gamepadKeyIDs));
-            if (SearchableCombo(label, &index, gamepadKeyNames, std::size(gamepadKeyNames))) {
+            if (SearchableCombo(GetLoc(labelKey, defaultLabel), &index, gamepadKeyNames, std::size(gamepadKeyNames))) {
                 keyID = gamepadKeyIDs[index];
                 changed = true;
             }
             };
 
-        RenderKeyBind("Left Click", ButtonLeftClick);
-        RenderKeyBind("Right Click", ButtonRightClick);
-        RenderKeyBind("Middle/Scroll Click", ButtonScrollClick);
-        RenderKeyBind("Scroll Up", ButtonScrollUp);
-        RenderKeyBind("Scroll Down", ButtonScrollDown);
-        RenderKeyBind("Confirm Action (Accept)", ButtonConfirm);
-        RenderKeyBind("Cancel Action (Cancel)", ButtonCancel);
+        RenderKeyBind("Button.Exit", "Exit Mouse Mode", ButtonExitMouseMode);
+        RenderKeyBind("Button.LeftClick", "Left Click", ButtonLeftClick);
+        RenderKeyBind("Button.RightClick", "Right Click", ButtonRightClick);
+        RenderKeyBind("Button.ScrollClick", "Middle/Scroll Click", ButtonScrollClick);
+        RenderKeyBind("Button.ScrollUp", "Scroll Up", ButtonScrollUp);
+        RenderKeyBind("Button.ScrollDown", "Scroll Down", ButtonScrollDown);
+        RenderKeyBind("Button.Confirm", "Confirm Action (Accept)", ButtonConfirm);
+        RenderKeyBind("Button.Cancel", "Cancel Action (Cancel)", ButtonCancel);
 
         if (changed) {
             Save();
@@ -245,6 +306,7 @@ namespace Settings {
 
     void RegisterMenu() {
         Load();
+        LoadLanguage();
         Settings::InitializeInput();
         if (SKSEMenuFramework::IsInstalled()) {
             SKSEMenuFramework::SetSection("Mouse Mode");

@@ -145,6 +145,10 @@ struct ProcessInputQueueHook {
                                     keepEvent = true;
                                 }
                             }
+
+                            if (!isMouseStick && !isDirStick) {
+                                keepEvent = true;
+                            }
                         }
                     }
                     else if (curr->GetEventType() == RE::INPUT_EVENT_TYPE::kButton) {
@@ -156,63 +160,92 @@ struct ProcessInputQueueHook {
                             bool isUp = btnEvent->IsUp();
                             bool isHeld = btnEvent->IsHeld();
 
-                            INPUT input = { 0 };
-                            bool shouldSendMouse = false;
-                            bool wasHandledInternally = false;
+                            // 1. CHECAGEM PRIORITÁRIA: Botão de Saída de Emergência do Mouse Mode
+                            if (keyID == Settings::ButtonExitMouseMode) {
+                                if (isDown) {
+                                    Settings::IsMouseModeActive = false;
+                                    std::string msg = "Mouse Mode OFF";
+                                    RE::SendHUDMessage::ShowHUDMessage(msg.c_str());
+                                }
+                                keepEvent = false; // Consome o input para sair de forma limpa sem disparar ações nativas
+                            }
+                            else {
+                                INPUT input = { 0 };
+                                bool shouldSendMouse = false;
+                                bool wasHandledInternally = false;
+                                bool isMapped = false; // Identifica se pertence ao nosso layout
 
-                            input.type = INPUT_MOUSE;
+                                input.type = INPUT_MOUSE;
 
-                            if (keyID == Settings::ButtonLeftClick) {
-                                if (isDown) input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-                                else if (isUp) input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
-                                shouldSendMouse = (isDown || isUp);
-                            }
-                            else if (keyID == Settings::ButtonRightClick) {
-                                if (isDown) input.mi.dwFlags = MOUSEEVENTF_RIGHTDOWN;
-                                else if (isUp) input.mi.dwFlags = MOUSEEVENTF_RIGHTUP;
-                                shouldSendMouse = (isDown || isUp);
-                            }
-                            else if (keyID == Settings::ButtonScrollClick) {
-                                if (isDown) input.mi.dwFlags = MOUSEEVENTF_MIDDLEDOWN;
-                                else if (isUp) input.mi.dwFlags = MOUSEEVENTF_MIDDLEUP;
-                                shouldSendMouse = (isDown || isUp);
-                            }
-                            // Permite scroll contínuo enquanto estiver segurando o botão
-                            else if (keyID == Settings::ButtonScrollUp && (isDown || isHeld)) {
-                                input.mi.dwFlags = MOUSEEVENTF_WHEEL;
-                                input.mi.mouseData = WHEEL_DELTA;
-                                shouldSendMouse = true;
-                            }
-                            else if (keyID == Settings::ButtonScrollDown && (isDown || isHeld)) {
-                                input.mi.dwFlags = MOUSEEVENTF_WHEEL;
-                                input.mi.mouseData = -WHEEL_DELTA;
-                                shouldSendMouse = true;
-                            }
-
-                            // Verifica confirmação/cancelamento se ESTIVER EM UM MENU
-                            if (inMenu) {
-                                if (keyID == Settings::ButtonConfirm) {
-                                    if (auto idEvent = btnEvent->AsIDEvent()) {
-                                        idEvent->userEvent = userEvents->accept;
+                                if (keyID == Settings::ButtonLeftClick) {
+                                    isMapped = true;
+                                    if (isDown) input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+                                    else if (isUp) input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+                                    shouldSendMouse = (isDown || isUp);
+                                }
+                                else if (keyID == Settings::ButtonRightClick) {
+                                    isMapped = true;
+                                    if (isDown) input.mi.dwFlags = MOUSEEVENTF_RIGHTDOWN;
+                                    else if (isUp) input.mi.dwFlags = MOUSEEVENTF_RIGHTUP;
+                                    shouldSendMouse = (isDown || isUp);
+                                }
+                                else if (keyID == Settings::ButtonScrollClick) {
+                                    isMapped = true;
+                                    if (isDown) input.mi.dwFlags = MOUSEEVENTF_MIDDLEDOWN;
+                                    else if (isUp) input.mi.dwFlags = MOUSEEVENTF_MIDDLEUP;
+                                    shouldSendMouse = (isDown || isUp);
+                                }
+                                else if (keyID == Settings::ButtonScrollUp) {
+                                    isMapped = true;
+                                    if (isDown || isHeld) {
+                                        input.mi.dwFlags = MOUSEEVENTF_WHEEL;
+                                        input.mi.mouseData = WHEEL_DELTA;
+                                        shouldSendMouse = true;
                                     }
-                                    keepEvent = true;
-                                    wasHandledInternally = true;
+                                }
+                                else if (keyID == Settings::ButtonScrollDown) {
+                                    isMapped = true;
+                                    if (isDown || isHeld) {
+                                        input.mi.dwFlags = MOUSEEVENTF_WHEEL;
+                                        input.mi.mouseData = -WHEEL_DELTA;
+                                        shouldSendMouse = true;
+                                    }
+                                }
+                                else if (keyID == Settings::ButtonConfirm) {
+                                    isMapped = true;
+                                    if (inMenu) {
+                                        if (auto idEvent = btnEvent->AsIDEvent()) {
+                                            idEvent->userEvent = userEvents->accept;
+                                        }
+                                        keepEvent = true;
+                                        wasHandledInternally = true;
+                                    }
                                 }
                                 else if (keyID == Settings::ButtonCancel) {
-                                    if (auto idEvent = btnEvent->AsIDEvent()) {
-                                        idEvent->userEvent = userEvents->cancel;
+                                    isMapped = true;
+                                    if (inMenu) {
+                                        if (auto idEvent = btnEvent->AsIDEvent()) {
+                                            idEvent->userEvent = userEvents->cancel;
+                                        }
+                                        keepEvent = true;
+                                        wasHandledInternally = true;
                                     }
-                                    keepEvent = true;
-                                    wasHandledInternally = true;
                                 }
-                            }
 
-                            if (shouldSendMouse) {
-                                SendInput(1, &input, sizeof(INPUT));
-                                keepEvent = false;
-                            }
-                            else if (!wasHandledInternally) {
-                                keepEvent = false;
+                                if (shouldSendMouse) {
+                                    SendInput(1, &input, sizeof(INPUT));
+                                    keepEvent = false;
+                                }
+                                else if (wasHandledInternally) {
+                                    // keepEvent já foi setado corretamente como true
+                                }
+                                else if (isMapped) {
+                                    // É mapeado no menu mas não atendeu às restrições (ex: Confirm fora de menus)
+                                    keepEvent = false;
+                                }
+                                else {
+                                    keepEvent = true;
+                                }
                             }
                         }
                     }
@@ -255,6 +288,5 @@ bool OnInput(RE::InputEvent* event) {
 
 void Hooks::Install() {
     ProcessInputQueueHook::install();
-    //InputEventHandler::Register(OnInput);
     TweenInputListener::Register();
 }

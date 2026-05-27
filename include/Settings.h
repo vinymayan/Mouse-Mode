@@ -65,6 +65,7 @@ namespace Settings {
     extern int ButtonScrollClick;
     extern int ButtonConfirm;
     extern int ButtonCancel;
+    extern int ButtonExitMouseMode;
 
     void Load();
     void Save();
